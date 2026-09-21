@@ -185,12 +185,20 @@
   .team-slot svg, .team-slot img.mon-icon{ width:42px; height:42px; object-fit:contain; }
   .team-slot .slot-name{ font-size:10.5px; font-weight:700; margin-top:1px; text-align:center; max-width:100%; overflow-wrap:anywhere; }
   .team-slot .slot-btn-row{ display:flex; flex-direction:column; align-items:stretch; gap:3px; margin-top:4px; width:100%; padding:0 4px; box-sizing:border-box; }
-  .team-slot .slot-moves-btn, .team-slot .slot-ev-btn, .team-slot .slot-item-btn{
+  .team-slot .slot-moves-btn, .team-slot .slot-ev-btn, .team-slot .slot-item-btn, .team-slot .slot-nature-btn{
     font-size:8.5px; padding:3px 4px; border-radius:10px; min-width:0; text-align:center;
     border:1px solid var(--border); background:var(--panel); color:var(--text); cursor:pointer;
     font-family:'JetBrains Mono', monospace; white-space:nowrap;
   }
   .team-slot .slot-ev-btn.ev-set{ border-color:var(--accent-2); color:var(--accent-2); font-weight:700; }
+  .team-slot .slot-nature-btn.nature-set{ border-color:var(--accent-2); color:var(--accent-2); font-weight:700; }
+  .party-icon.hidden-opponent{ color:var(--text-dim); font:900 15px 'JetBrains Mono',monospace; user-select:none; }
+  .party-icon.hidden-opponent .hp-dot,.party-icon.hidden-opponent .st-dot{ display:none; }
+  .nature-grid{ display:grid; grid-template-columns:1fr 1fr; gap:5px; }
+  .nature-option{ display:flex; align-items:center; gap:6px; padding:7px 6px; border:1px solid var(--border); border-radius:8px; background:var(--panel-2); cursor:pointer; }
+  .nature-option input{ width:16px; height:16px; flex-shrink:0; }
+  .nature-option .n-name{ font-size:11px; font-weight:800; }
+  .nature-option .n-meta{ font-size:8.5px; color:var(--text-dim); margin-top:1px; line-height:1.25; }
   .team-slot .slot-item-btn.item-set{ border-color:var(--accent); color:var(--accent); font-weight:700; }
   .team-slot .ev-total-tag{
     font-size:8px; color:var(--text-dim); margin-top:2px; font-family:'JetBrains Mono', monospace;
@@ -848,6 +856,18 @@
             <div class="modal-actions">
               <button class="btn-cancel" id="item-modal-cancel">キャンセル</button>
               <button class="btn-ok" id="item-modal-ok">けってい</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-backdrop" id="nature-modal">
+          <div class="modal-box">
+            <h3 id="nature-modal-title">性格・能力補正を選ぶ</h3>
+            <div class="modal-sub">Pokémon Champions準拠：HPを除き、1能力を×1.1、1能力を×0.9。無補正は「まじめ」のみ。</div>
+            <div id="nature-modal-list" class="nature-grid"></div>
+            <div class="modal-actions">
+              <button class="btn-cancel" id="nature-modal-cancel" type="button">キャンセル</button>
+              <button class="btn-ok" id="nature-modal-ok" type="button">けってい</button>
             </div>
           </div>
         </div>
@@ -1956,10 +1976,53 @@
   const LEVEL = 50, IV = 31;
   const EV_TOTAL = 66, EV_STAT_MAX = 32;
   const EV_KEYS = ['hp','atk','def','spa','spd','spe'];
+
+  // Pokémon ChampionsのStat Alignmentを、このゲームでは「性格・能力補正」として表示。
+  // HPは補正対象外。非HP能力は×1.1 / ×0.9 / ×1.0。
+  const NATURES = [
+    {id:'lonely',name:'さみしがり',up:'atk',down:'def'},
+    {id:'brave',name:'ゆうかん',up:'atk',down:'spe'},
+    {id:'adamant',name:'いじっぱり',up:'atk',down:'spa'},
+    {id:'naughty',name:'やんちゃ',up:'atk',down:'spd'},
+    {id:'bold',name:'ずぶとい',up:'def',down:'atk'},
+    {id:'relaxed',name:'のんき',up:'def',down:'spe'},
+    {id:'impish',name:'わんぱく',up:'def',down:'spa'},
+    {id:'lax',name:'のうてんき',up:'def',down:'spd'},
+    {id:'timid',name:'おくびょう',up:'spe',down:'atk'},
+    {id:'hasty',name:'せっかち',up:'spe',down:'def'},
+    {id:'jolly',name:'ようき',up:'spe',down:'spa'},
+    {id:'naive',name:'むじゃき',up:'spe',down:'spd'},
+    {id:'modest',name:'ひかえめ',up:'spa',down:'atk'},
+    {id:'mild',name:'おっとり',up:'spa',down:'def'},
+    {id:'quiet',name:'れいせい',up:'spa',down:'spe'},
+    {id:'rash',name:'うっかりや',up:'spa',down:'spd'},
+    {id:'calm',name:'おだやか',up:'spd',down:'atk'},
+    {id:'gentle',name:'おとなしい',up:'spd',down:'def'},
+    {id:'sassy',name:'しんちょう',up:'spd',down:'spe'},
+    {id:'careful',name:'なまいき',up:'spd',down:'spa'},
+    {id:'serious',name:'まじめ',up:null,down:null}
+  ];
+  const NATURE_MAP = Object.fromEntries(NATURES.map(n=>[n.id,n]));
+  const STAT_NAME_SHORT = {atk:'攻撃',def:'防御',spa:'特攻',spd:'特防',spe:'素早さ'};
   function emptyEvs(){ return {hp:0,atk:0,def:0,spa:0,spd:0,spe:0}; }
+  function normalizeNature(id){ return NATURE_MAP[id] ? id : 'serious'; }
+  function natureModifier(natureId,stat){
+    if(stat==='hp') return 1;
+    const n=NATURE_MAP[normalizeNature(natureId)];
+    if(n.up===stat) return 1.1;
+    if(n.down===stat) return 0.9;
+    return 1;
+  }
+  function natureLabel(natureId){
+    const n=NATURE_MAP[normalizeNature(natureId)];
+    if(!n.up) return `${n.name}（無補正）`;
+    return `${n.name}（${STAT_NAME_SHORT[n.up]}↑ / ${STAT_NAME_SHORT[n.down]}↓）`;
+  }
+  function randomNature(){ return NATURES[Math.floor(Math.random()*NATURES.length)].id; }
   function totalEv(evs){ return EV_KEYS.reduce((s,k)=> s + (evs[k]||0), 0); }
   function calcHP(base, ev){ return Math.floor((2*base+IV)*LEVEL/100) + LEVEL + 10 + (ev||0); }
   function calcStat(base, ev){ return Math.floor((2*base+IV)*LEVEL/100) + 5 + (ev||0); }
+  function calcCombatStat(base, ev, natureId, stat){ return Math.floor(calcStat(base,ev) * natureModifier(natureId,stat)); }
 
   // Random EV spread for the enemy AI team, respecting the same 66pt budget.
   function randomEVs(){
@@ -1976,17 +2039,18 @@
     return evs;
   }
 
-  function makeCombatant(sp, moves, evs, item, ability){
+  function makeCombatant(sp, moves, evs, item, ability, natureId){
     evs = evs || emptyEvs();
+    natureId = normalizeNature(natureId);
     const stats = {
       hp: calcHP(sp.base.hp, evs.hp),
-      atk: calcStat(sp.base.atk, evs.atk),
-      def: calcStat(sp.base.def, evs.def),
-      spa: calcStat(sp.base.spa, evs.spa),
-      spd: calcStat(sp.base.spd, evs.spd),
-      spe: calcStat(sp.base.spe, evs.spe),
+      atk: calcCombatStat(sp.base.atk, evs.atk, natureId, 'atk'),
+      def: calcCombatStat(sp.base.def, evs.def, natureId, 'def'),
+      spa: calcCombatStat(sp.base.spa, evs.spa, natureId, 'spa'),
+      spd: calcCombatStat(sp.base.spd, evs.spd, natureId, 'spd'),
+      spe: calcCombatStat(sp.base.spe, evs.spe, natureId, 'spe'),
     };
-    return { species: sp, stats, currentHP: stats.hp, moves: moves, evs, item: item || null, ability: (sp.abilities||[]).includes(ability) ? ability : ((sp.abilities||[])[0] || null), itemConsumed:false, choiceLockedMove:null,
+    return { species: sp, stats, currentHP: stats.hp, moves: moves, evs, nature:natureId, item: item || null, ability: (sp.abilities||[]).includes(ability) ? ability : ((sp.abilities||[])[0] || null), itemConsumed:false, choiceLockedMove:null,
       stages: { atk:0, def:0, spa:0, spd:0, spe:0, acc:0, eva:0 },
       status: null,        // brn / par / psn / tox / slp / frz
       toxCount: 0,         // もうどくの経過ターン数
@@ -2382,7 +2446,7 @@
         if(moves.length>=4) break;
         if(!moves.some(x=>x.name===m.name)) moves.push(m);
       }
-      const abilities = sp.abilities || []; const ability = abilities.includes(ABILITY_RENAME[slot.ability] || slot.ability) ? (ABILITY_RENAME[slot.ability] || slot.ability) : (abilities[0] || null); return {sp, moves, evs:{...emptyEvs(), ...(slot.evs||{})}, item: ITEM_MAP[slot.item] ? slot.item : null, ability};
+      const abilities = sp.abilities || []; const ability = abilities.includes(ABILITY_RENAME[slot.ability] || slot.ability) ? (ABILITY_RENAME[slot.ability] || slot.ability) : (abilities[0] || null); return {sp, moves, evs:{...emptyEvs(), ...(slot.evs||{})}, nature:normalizeNature(slot.nature), item: ITEM_MAP[slot.item] ? slot.item : null, ability};
     }).filter(Boolean).slice(0,6);
   }
   function loadTeamFromStorage(){
@@ -2457,7 +2521,7 @@
       const item=ITEM_MAP[m.item]?m.item:null;
       const ability=(sp.abilities||[]).includes(m.ability)?m.ability:((sp.abilities||[])[0]||null);
       if(!moves.length) return null;
-      return {sp,moves,evs,item,ability};
+      return {sp,moves,evs,nature:normalizeNature(m.nature),item,ability};
     }).filter(Boolean).slice(0,6);
   }
   function rentalLoad(def){
@@ -2563,6 +2627,11 @@
   const itemModalList = document.getElementById('item-modal-list');
   const itemModalTitle = document.getElementById('item-modal-title');
   const itemModalOk = document.getElementById('item-modal-ok');
+  const natureModal = document.getElementById('nature-modal');
+  const natureModalList = document.getElementById('nature-modal-list');
+  const natureModalTitle = document.getElementById('nature-modal-title');
+  const natureModalOk = document.getElementById('nature-modal-ok');
+  let natureWorking = 'serious';
   const sdModal = document.getElementById('species-detail-modal');
   const sdIcon = document.getElementById('sd-icon');
   const sdName = document.getElementById('sd-name');
@@ -2731,7 +2800,7 @@
       state.team.splice(idx,1);
     } else {
       if(state.team.length>=teamLimit()) return;
-      state.team.push({ sp, moves: sp.moves.slice(0,4), evs: emptyEvs(), item: null, ability: (sp.abilities||[])[0] || null });
+      state.team.push({ sp, moves: sp.moves.slice(0,4), evs: emptyEvs(), nature:'serious', item: null, ability: (sp.abilities||[])[0] || null });
     }
     saveTeamToStorage();
     renderTeamGrid();
@@ -2773,6 +2842,34 @@
     itemModal.classList.remove('show'); saveTeamToStorage(); renderTeamSlots();
   });
   document.getElementById('item-modal-cancel').addEventListener('click',()=>itemModal.classList.remove('show'));
+
+  function renderNatureOptions(selected){
+    natureModalList.innerHTML = NATURES.map(n=>{
+      const effect = n.up
+        ? `${STAT_NAME_SHORT[n.up]}↑ ×1.1 / ${STAT_NAME_SHORT[n.down]}↓ ×0.9`
+        : '攻撃・防御・特攻・特防・素早さ ×1.0';
+      return `<label class="nature-option"><input type="radio" name="nature-select" value="${n.id}" ${selected===n.id?'checked':''}><div><div class="n-name">${n.name}</div><div class="n-meta">${effect}</div></div></label>`;
+    }).join('');
+    natureModalList.querySelectorAll('input[type=radio]').forEach(r=>r.addEventListener('change',()=>{natureWorking=r.value;}));
+  }
+  function openNatureEditor(i){
+    const slot=state.team[i]; if(!slot) return;
+    state.editingSlot=i;
+    natureWorking=normalizeNature(slot.nature);
+    natureModalTitle.textContent=`${slot.sp.name}の性格・能力補正`;
+    renderNatureOptions(natureWorking);
+    natureModal.classList.add('show');
+    natureModal.querySelector('.modal-box').scrollTop=0;
+  }
+  natureModalOk.addEventListener('click',()=>{
+    const slot=state.team[state.editingSlot];
+    if(slot) slot.nature=normalizeNature(natureWorking);
+    natureModal.classList.remove('show');
+    saveTeamToStorage();
+    renderTeamSlots();
+  });
+  document.getElementById('nature-modal-cancel').addEventListener('click',()=>natureModal.classList.remove('show'));
+  natureModal.addEventListener('click',e=>{if(e.target===natureModal)natureModal.classList.remove('show');});
 
   function sanitizeTeamItems(){
     const used = new Set();
@@ -2916,6 +3013,7 @@
           <div class="slot-btn-row">
             <button type="button" class="slot-moves-btn">技(${slot.moves.length}/4)</button>
             <button type="button" class="slot-ev-btn${totalEv(slot.evs)>0 ? ' ev-set' : ''}">努力値${totalEv(slot.evs)}/${EV_TOTAL}</button>
+            <button type="button" class="slot-nature-btn${normalizeNature(slot.nature)!=='serious' ? ' nature-set' : ''}">性格:${natureLabel(slot.nature)}</button>
             <button type="button" class="slot-item-btn${slot.item ? ' item-set' : ''}">${slot.item ? ITEM_MAP[slot.item].name : '持ち物なし'}</button>
           </div>
         `;
@@ -2928,6 +3026,7 @@
         });
         div.querySelector('.slot-moves-btn').addEventListener('click', (e)=>{ e.stopPropagation(); openMoveEditor(i); });
         div.querySelector('.slot-ev-btn').addEventListener('click', (e)=>{ e.stopPropagation(); openEvEditor(i); });
+        div.querySelector('.slot-nature-btn').addEventListener('click', (e)=>{ e.stopPropagation(); openNatureEditor(i); });
         div.querySelector('.slot-item-btn').addEventListener('click', (e)=>{ e.stopPropagation(); openItemEditor(i); });
       } else {
         div.className = 'team-slot';
@@ -3051,7 +3150,7 @@
         <span class="ev-base mono">種${slot.sp.base[k]}</span>
         <input type="range" min="0" max="${EV_STAT_MAX}" step="1" value="${evWorking[k]}" data-key="${k}">
         <span class="ev-val mono" id="ev-val-${k}">${evWorking[k]}</span>
-        <span class="ev-final mono" id="ev-final-${k}">→${k==='hp' ? calcHP(slot.sp.base[k], evWorking[k]) : calcStat(slot.sp.base[k], evWorking[k])}</span>
+        <span class="ev-final mono" id="ev-final-${k}">→${k==='hp' ? calcHP(slot.sp.base[k], evWorking[k]) : calcCombatStat(slot.sp.base[k], evWorking[k], normalizeNature(slot.nature), k)}</span>
       </div>`).join('');
     evModalList.querySelectorAll('input[type=range]').forEach(inp=>{
       inp.addEventListener('input', ()=> onEvInput(inp, slot.sp));
@@ -3074,7 +3173,8 @@
     EV_KEYS.forEach(k=>{
       const v = evWorking[k];
       document.getElementById('ev-val-'+k).textContent = v;
-      const final = k==='hp' ? calcHP(sp.base[k], v) : calcStat(sp.base[k], v);
+      const slot=state.team[state.editingSlot];
+      const final = k==='hp' ? calcHP(sp.base[k], v) : calcCombatStat(sp.base[k], v, normalizeNature(slot?.nature), k);
       document.getElementById('ev-final-'+k).textContent = '→' + final;
     });
     evRemainingEl.textContent = EV_TOTAL - totalEv(evWorking);
@@ -3129,28 +3229,53 @@
     updateHPBar(side);
   }
 
+  function isOpponentKnown(side,idx){
+    if(side!=='enemy' || !state.battle?.online) return true;
+    const arr=Array.isArray(state.battle.revealedEnemy)?state.battle.revealedEnemy:[];
+    return arr.includes(idx) || idx===state.battle.activeE;
+  }
+  function revealIndex(side,idx){
+    if(!state.battle?.online || !Number.isInteger(idx)) return;
+    const key=side==='player'?'revealedPlayer':'revealedEnemy';
+    if(!Array.isArray(state.battle[key])) state.battle[key]=[];
+    if(!state.battle[key].includes(idx)) state.battle[key].push(idx);
+  }
   function renderPartyBar(side){
     const team = side==='player' ? state.battle.playerTeam : state.battle.enemyTeam;
     const activeIdx = side==='player' ? state.battle.activeP : state.battle.activeE;
     const container = document.getElementById(side+'-party');
     container.innerHTML = '';
     team.forEach((c,i)=>{
+      const known = isOpponentKnown(side,i);
+      const hidden = side==='enemy' && state.battle.online && !known;
       const t = TYPES[c.species.types[0]];
       const div = document.createElement('div');
       let cls = 'party-icon';
       if(i===activeIdx) cls += ' active';
       if(c.currentHP<=0) cls += ' fainted';
+      const forcedGuestSwitch = side==='player' && state.battle.online &&
+        state.online.role==='guest' && state.online.remoteForcedSwitch;
       const canSelect = side==='player' && c.currentHP>0 && i!==activeIdx && !state.battle.gameOver &&
-        (state.battle.forcedSwitch || !state.battle.locked);
+        (state.battle.forcedSwitch || forcedGuestSwitch || !state.battle.locked);
       if(canSelect) cls += ' selectable';
+      if(hidden) cls += ' hidden-opponent';
       div.className = cls;
       div.style.borderColor = i===activeIdx ? t.c2 : '';
-      const hpPct = c.stats.hp ? c.currentHP / c.stats.hp : 0;
-      const hpColor = c.currentHP<=0 ? '#777' : (hpPct>0.5 ? 'var(--hp-high)' : (hpPct>0.2 ? 'var(--hp-mid)' : 'var(--hp-low)'));
-      div.innerHTML = buildMonsterIcon(c.species) + `<span class="hp-dot" style="background:${hpColor}"></span>` +
-        (c.status ? `<span class="st-dot" style="background:${STATUS_INFO[c.status].color}"></span>` : '');
-      if(canSelect) div.addEventListener('click', ()=> onPartyIconClick(side, i));
-      else { div.style.cursor='pointer'; div.addEventListener('click', ()=> openMonInfo(side, i)); }
+      if(hidden){
+        div.textContent='?';
+        div.title='まだ場に出ていないため表示されません';
+      }else{
+        const hpPct = c.stats.hp ? c.currentHP / c.stats.hp : 0;
+        const hpColor = c.currentHP<=0 ? '#777' : (hpPct>0.5 ? 'var(--hp-high)' : (hpPct>0.2 ? 'var(--hp-mid)' : 'var(--hp-low)'));
+        div.innerHTML = buildMonsterIcon(c.species) + `<span class="hp-dot" style="background:${hpColor}"></span>` +
+          (c.status ? `<span class="st-dot" style="background:${STATUS_INFO[c.status].color}"></span>` : '');
+      }
+      if(canSelect){
+        div.addEventListener('click', ()=> onPartyIconClick(side, i));
+      }else if(!hidden){
+        div.style.cursor='pointer';
+        div.addEventListener('click', ()=> openMonInfo(side, i));
+      }
       container.appendChild(div);
     });
   }
@@ -3353,7 +3478,7 @@
   }
 
   function onPartyIconClick(side, idx){
-    if(state.battle?.online){if(side!=='player'||state.battle.gameOver)return;const c=state.battle.playerTeam[idx];if(!c||c.currentHP<=0||idx===state.battle.activeP)return;if(state.battle.forcedSwitch){const om=activePlayerC();if(om&&om.currentHP>0)applySwitchOutEffects(om);state.battle.activeP=idx;state.battle.forcedSwitch=false;logMessage(`いけ! ${c.species.name}!`);updateSideDisplay('player');updatePartyBars();applyEntryHazards(c,'player');tryHpBerry(c);runEntryAbilities(c,'player');activateTerrainSeedBothSides(sideState('player').terrain);syncOnlineSnapshot();renderMoveButtons();const resume=state.battle.resume;state.battle.resume=null;if(c.currentHP<=0){updateSideDisplay('player');updatePartyBars();syncOnlineSnapshot();setTimeout(()=>handleFaint('player',resume||(()=>{setButtonsEnabled(true);state.battle.locked=false;})),650);return;}if(resume){setButtonsEnabled(false);setTimeout(resume,650);}else{setButtonsEnabled(true);state.battle.locked=false;}return;}if(state.online.remoteForcedSwitch&&state.online.role==='guest'){submitOnlineAction({type:'switch',idx});return;}if(state.battle.locked||state.online.pendingLocalAction)return;if(activePlayerC().noSwitch||activePlayerC().bindTurns>0||activePlayerC().flyCharging)return;submitOnlineAction({type:'switch',idx});return;}
+    if(state.battle?.online){if(side!=='player'||state.battle.gameOver)return;const c=state.battle.playerTeam[idx];if(!c||c.currentHP<=0||idx===state.battle.activeP)return;if(state.battle.forcedSwitch){const om=activePlayerC();if(om&&om.currentHP>0)applySwitchOutEffects(om);state.battle.activeP=idx;state.battle.forcedSwitch=false;logMessage(`いけ! ${c.species.name}!`);updateSideDisplay('player');updatePartyBars();applyEntryHazards(c,'player');tryHpBerry(c);runEntryAbilities(c,'player');activateTerrainSeedBothSides(sideState('player').terrain);syncOnlineSnapshot();renderMoveButtons();const resume=state.battle.resume;state.battle.resume=null;if(c.currentHP<=0){updateSideDisplay('player');updatePartyBars();syncOnlineSnapshot();setTimeout(()=>handleFaint('player',resume||(()=>{setButtonsEnabled(true);state.battle.locked=false;})),650);return;}if(resume){setButtonsEnabled(false);setTimeout(resume,650);}else{setButtonsEnabled(true);state.battle.locked=false;}return;}if(state.online.remoteForcedSwitch&&state.online.role==='guest'){revealIndex('player',idx);submitOnlineAction({type:'switch',idx});return;}if(state.battle.locked||state.online.pendingLocalAction)return;if(activePlayerC().noSwitch||activePlayerC().bindTurns>0||activePlayerC().flyCharging)return;submitOnlineAction({type:'switch',idx});return;}
     if(side!=='player' || state.battle.gameOver) return;
     const c = state.battle.playerTeam[idx];
     if(!c || c.currentHP<=0 || idx===state.battle.activeP) return;
@@ -3515,6 +3640,7 @@
     }
     if(outgoing) applySwitchOutEffects(outgoing);
     const newMon = teamArr[act.idx];
+    if(state.battle.online) revealIndex(act.side, act.idx);
     if(act.side==='player') state.battle.activeP = act.idx; else state.battle.activeE = act.idx;
     const label = act.side==='player' ? 'あなたは' : '相手は';
     logMessage(`${label} ${newMon.species.name}を くりだした!`);
@@ -4663,8 +4789,8 @@
   function startBattle(){if(state.onlineMode)return;
     if(state.team.length !== 3) return;
     const enemySpecies = shuffleArr(SPECIES).slice(0,3);
-    const playerTeam = state.team.map(slot => makeCombatant(slot.sp, slot.moves, slot.evs, slot.item, slot.ability));
-    const enemyTeam = enemySpecies.map(sp => makeCombatant(sp, shuffleArr(sp.moves).slice(0,4), randomEVs()));
+    const playerTeam = state.team.map(slot => makeCombatant(slot.sp, slot.moves, slot.evs, slot.item, slot.ability, slot.nature));
+    const enemyTeam = enemySpecies.map(sp => makeCombatant(sp, shuffleArr(sp.moves).slice(0,4), randomEVs(), null, null, randomNature()));
 
     state.battle = {
       playerTeam, enemyTeam,
@@ -4687,23 +4813,23 @@
   function onlineSend(msg){try{if(state.online.conn&&state.online.conn.open)state.online.conn.send(msg);}catch(e){}}
   function setOnlineStatus(t){onlineStatus.textContent=t;const j=document.getElementById('online-join-status');if(j)j.textContent=(state.online.role==='host')?'':t;}
   function makeRoomCode(){return String(Math.floor(100000+Math.random()*900000));}
-  function serializeSlot(slot){return{id:slot.sp.id,moves:slot.moves.map(m=>m.name),evs:slot.evs,item:slot.item,ability:slot.ability};}
+  function serializeSlot(slot){return{id:slot.sp.id,moves:slot.moves.map(m=>m.name),evs:slot.evs,nature:normalizeNature(slot.nature),item:slot.item,ability:slot.ability};}
   function sanitizeEvs(raw){
     const evs=emptyEvs(); let left=EV_TOTAL; const src=(raw&&typeof raw==='object')?raw:{};
     EV_KEYS.forEach(k=>{ const v=Math.max(0,Math.min(EV_STAT_MAX,Math.floor(Number(src[k])||0))); const u=Math.min(v,left); evs[k]=u; left-=u; });
     return evs;
   }
-  function hydrateSlot(x){const sp=SPECIES.find(s=>s.id===x.id);if(!sp)return null;const moves=(Array.isArray(x.moves)?x.moves:[]).map(n=>sp.moves.find(m=>m.name===n)).filter(Boolean).slice(0,4);while(moves.length<4&&sp.moves[moves.length])moves.push(sp.moves[moves.length]);return{sp,moves,evs:sanitizeEvs(x.evs),item:ITEM_MAP[x.item]?x.item:null,ability:(sp.abilities||[]).includes(x.ability)?x.ability:((sp.abilities||[])[0]||null)};}
+  function hydrateSlot(x){const sp=SPECIES.find(s=>s.id===x.id);if(!sp)return null;const moves=(Array.isArray(x.moves)?x.moves:[]).map(n=>sp.moves.find(m=>m.name===n)).filter(Boolean).slice(0,4);while(moves.length<4&&sp.moves[moves.length])moves.push(sp.moves[moves.length]);return{sp,moves,evs:sanitizeEvs(x.evs),nature:normalizeNature(x.nature),item:ITEM_MAP[x.item]?x.item:null,ability:(sp.abilities||[]).includes(x.ability)?x.ability:((sp.abilities||[])[0]||null)};}
   function serializeCombatant(c){
-    const keys=['currentHP','evs','item','ability','itemConsumed','choiceLockedMove','stages','status','toxCount','sleepTurns','frzChecks','confused','taunt','flinched','destinyBond','movedThisTurn','outrageTurns','bindTurns','leechSeed','noSwitch','disableTurns','disabledMove','flyCharging','chargeMove','chargeEffect','semiInvuln','glaiveRushVulnerable','actingLast','plannedMove','voidNextMove','lastPhysicalDamageTaken','wasHitThisTurn','perishCount','yawn','wish','ingrain','encoreTurns','encoreMove','octolock','stockpileCount','stockpileDef','stockpileSpd','substituteHP','rageFistHits','extraTypes','overrideTypes'];
+    const keys=['currentHP','evs','nature','item','ability','itemConsumed','choiceLockedMove','stages','status','toxCount','sleepTurns','frzChecks','confused','taunt','flinched','destinyBond','movedThisTurn','outrageTurns','bindTurns','leechSeed','noSwitch','disableTurns','disabledMove','flyCharging','chargeMove','chargeEffect','semiInvuln','glaiveRushVulnerable','actingLast','plannedMove','voidNextMove','lastPhysicalDamageTaken','wasHitThisTurn','perishCount','yawn','wish','ingrain','encoreTurns','encoreMove','octolock','stockpileCount','stockpileDef','stockpileSpd','substituteHP','rageFistHits','extraTypes','overrideTypes'];
     const o={speciesId:c.species.id,moves:c.moves.map(m=>m.name)};
     keys.forEach(k=>{ if(k==='lastPhysicalAttacker') return; o[k]=c[k]; });
     o.lastPhysicalAttacker = c.lastPhysicalAttacker?.species?.id || null;
     ['choiceLockedMove','disabledMove','plannedMove','chargeMove'].forEach(k=>{if(o[k]&&typeof o[k]==='object')o[k]=o[k].name;});
     return o;
   }
-  function hydrateCombatant(x){const sp=SPECIES.find(s=>s.id===x.speciesId);if(!sp)return null;const moves=(x.moves||[]).map(n=>sp.moves.find(m=>m.name===n)).filter(Boolean);const c=makeCombatant(sp,moves.length?moves:sp.moves.slice(0,4),x.evs||emptyEvs(),x.item||null,x.ability||((sp.abilities||[])[0]||null));Object.keys(x).forEach(k=>{if(k!=='speciesId'&&k!=='moves'&&k!=='evs')c[k]=x[k];});['choiceLockedMove','disabledMove','plannedMove','chargeMove'].forEach(k=>{if(typeof c[k]==='string')c[k]=c.moves.find(m=>m.name===c[k])||M[c[k]]||null;});return c;}
-  function onlineBattleSnapshot(phase){const b=state.battle;return{type:'battleSnapshot',phase:phase||'ready',activeP:b.activeP,activeE:b.activeE,playerTeam:b.playerTeam.map(serializeCombatant),enemyTeam:b.enemyTeam.map(serializeCombatant),playerField:b.playerField,enemyField:b.enemyField,weather:b.weather,weatherTurns:b.weatherTurns,gameOver:b.gameOver,totalTime:b.totalTime,remoteForcedSwitch:!!state.online.remoteForcedSwitch,hostTime:b.hostTime,guestTime:b.guestTime,turnDeadline:b.turnDeadline,log:b.log||[]};}
+  function hydrateCombatant(x){const sp=SPECIES.find(s=>s.id===x.speciesId);if(!sp)return null;const moves=(x.moves||[]).map(n=>sp.moves.find(m=>m.name===n)).filter(Boolean);const c=makeCombatant(sp,moves.length?moves:sp.moves.slice(0,4),x.evs||emptyEvs(),x.item||null,x.ability||((sp.abilities||[])[0]||null),normalizeNature(x.nature));Object.keys(x).forEach(k=>{if(k!=='speciesId'&&k!=='moves'&&k!=='evs')c[k]=x[k];});c.nature=normalizeNature(c.nature);['choiceLockedMove','disabledMove','plannedMove','chargeMove'].forEach(k=>{if(typeof c[k]==='string')c[k]=c.moves.find(m=>m.name===c[k])||M[c[k]]||null;});return c;}
+  function onlineBattleSnapshot(phase){const b=state.battle;return{type:'battleSnapshot',phase:phase||'ready',activeP:b.activeP,activeE:b.activeE,playerTeam:b.playerTeam.map(serializeCombatant),enemyTeam:b.enemyTeam.map(serializeCombatant),revealedPlayer:Array.isArray(b.revealedPlayer)?b.revealedPlayer.slice():[b.activeP],revealedEnemy:Array.isArray(b.revealedEnemy)?b.revealedEnemy.slice():[b.activeE],playerField:b.playerField,enemyField:b.enemyField,weather:b.weather,weatherTurns:b.weatherTurns,gameOver:b.gameOver,totalTime:b.totalTime,remoteForcedSwitch:!!state.online.remoteForcedSwitch,hostTime:b.hostTime,guestTime:b.guestTime,turnDeadline:b.turnDeadline,log:b.log||[]};}
   // phase='progress': ターン処理の途中経過をゲストにも見せるための表示専用スナップショット(入力ロック等は変更しない)
   // phase='ready'(省略時): ターン終了・交代待ちなど、ゲスト側の操作を再開させる本来の同期
   function syncOnlineSnapshot(phase){if(state.battle?.online&&state.online.role==='host')onlineSend(onlineBattleSnapshot(phase));}
@@ -4762,8 +4888,8 @@
     submitOnlineAction({type:'move',idx:usable.length?usable[Math.floor(Math.random()*usable.length)].i:0});
   }
   function submitOnlineAction(a){state.online.pendingLocalAction=a;state.battle.locked=true;setButtonsEnabled(false);updatePartyBars();onlineSend({type:'action',action:a});if(state.online.role==='host')maybeRunOnlineActions();}
-  function maybeRunOnlineActions(){if(state.online.role!=='host'||!state.battle?.online||state.battle.gameOver)return;if(state.online.remoteForcedSwitch&&state.online.pendingRemoteAction?.type==='switch'){const idx=state.online.pendingRemoteAction.idx;const om=activeEnemyC();if(om&&om.currentHP>0)applySwitchOutEffects(om);state.battle.activeE=idx;state.online.remoteForcedSwitch=false;const cb=state.online.remoteSwitchResume;state.online.remoteSwitchResume=null;state.online.pendingRemoteAction=null;state.online.pendingLocalAction=null;logMessage(`相手は ${state.battle.enemyTeam[idx].species.name}を くりだした!`);updateSideDisplay('enemy');updatePartyBars();const nm=state.battle.enemyTeam[idx];applyEntryHazards(nm,'enemy');tryHpBerry(nm);if(nm.currentHP<=0){updateSideDisplay('enemy');updatePartyBars();syncOnlineSnapshot();setTimeout(()=>handleFaint('enemy',cb||(()=>{})),650);return;}runEntryAbilities(nm,'enemy');activateTerrainSeedBothSides(sideState('enemy').terrain);setTimeout(()=>cb&&cb(),350);syncOnlineSnapshot();return;}if(state.online.remoteForcedSwitch)return;const pa=state.online.pendingLocalAction,ea=state.online.pendingRemoteAction;if(!pa||!ea)return;const pc=activePlayerC(),ec=activeEnemyC();const pAct=pa.type==='switch'?{type:'switch',idx:pa.idx}:{type:'move',move:pc.moves[pa.idx],actor:pc};const eAct=ea.type==='switch'?{type:'switch',idx:ea.idx}:{type:'move',move:ec.moves[ea.idx],actor:ec};startTurnQueue(buildActions(pAct,eAct));}
-  function startOnlineBattle(hostPick,guestPick){const my=state.online.role==='host'?hostPick:guestPick,foe=state.online.role==='host'?guestPick:hostPick;const my6=state.online.myTeam6.map(hydrateSlot),foe6=state.online.foeTeam6.map(hydrateSlot);state.online.localReady=false;state.online.foeReady=false;state.online.previewReady=false;state.online.foePick=null;const player=my.map(i=>my6[i]).map(s=>makeCombatant(s.sp,s.moves,s.evs,s.item,s.ability)),enemy=foe.map(i=>foe6[i]).map(s=>makeCombatant(s.sp,s.moves,s.evs,s.item,s.ability));state.battle={playerTeam:player,enemyTeam:enemy,activeP:0,activeE:0,playerField:{reflect:0,lightScreen:0,stealthRock:false,spikes:0,toxicSpikes:0,tailwind:0,trickRoom:0},enemyField:{reflect:0,lightScreen:0,stealthRock:false,spikes:0,toxicSpikes:0,tailwind:0,trickRoom:0},weather:null,weatherTurns:0,locked:false,gameOver:false,forcedSwitch:false,resume:null,online:true,hostTime:420,guestTime:420,totalTime:1200,turnDeadline:Date.now()+45000,log:[]};state.online.pendingLocalAction=null;state.online.pendingRemoteAction=null;state.online.remoteForcedSwitch=false;showScreen('battle');onlinePreview.classList.remove('show');onlineClockbar.classList.add('show');renderBattleScreen();beginOnlineClockTicker();logMessage(`${state.online.foeName}と バトル開始!`,true);logMessage(`いけ! ${player[0].species.name}!`);if(state.online.role==='host'){runLeadAbilities();syncOnlineSnapshot();}}
+  function maybeRunOnlineActions(){if(state.online.role!=='host'||!state.battle?.online||state.battle.gameOver)return;if(state.online.remoteForcedSwitch&&state.online.pendingRemoteAction?.type==='switch'){const idx=state.online.pendingRemoteAction.idx;const om=activeEnemyC();if(om&&om.currentHP>0)applySwitchOutEffects(om);state.battle.activeE=idx;revealIndex('enemy',idx);state.online.remoteForcedSwitch=false;const cb=state.online.remoteSwitchResume;state.online.remoteSwitchResume=null;state.online.pendingRemoteAction=null;state.online.pendingLocalAction=null;logMessage(`相手は ${state.battle.enemyTeam[idx].species.name}を くりだした!`);updateSideDisplay('enemy');updatePartyBars();const nm=state.battle.enemyTeam[idx];applyEntryHazards(nm,'enemy');tryHpBerry(nm);if(nm.currentHP<=0){updateSideDisplay('enemy');updatePartyBars();syncOnlineSnapshot();setTimeout(()=>handleFaint('enemy',cb||(()=>{})),650);return;}runEntryAbilities(nm,'enemy');activateTerrainSeedBothSides(sideState('enemy').terrain);setTimeout(()=>cb&&cb(),350);syncOnlineSnapshot();return;}if(state.online.remoteForcedSwitch)return;const pa=state.online.pendingLocalAction,ea=state.online.pendingRemoteAction;if(!pa||!ea)return;const pc=activePlayerC(),ec=activeEnemyC();const pAct=pa.type==='switch'?{type:'switch',idx:pa.idx}:{type:'move',move:pc.moves[pa.idx],actor:pc};const eAct=ea.type==='switch'?{type:'switch',idx:ea.idx}:{type:'move',move:ec.moves[ea.idx],actor:ec};startTurnQueue(buildActions(pAct,eAct));}
+  function startOnlineBattle(hostPick,guestPick){const my=state.online.role==='host'?hostPick:guestPick,foe=state.online.role==='host'?guestPick:hostPick;const my6=state.online.myTeam6.map(hydrateSlot),foe6=state.online.foeTeam6.map(hydrateSlot);state.online.localReady=false;state.online.foeReady=false;state.online.previewReady=false;state.online.foePick=null;const player=my.map(i=>my6[i]).map(s=>makeCombatant(s.sp,s.moves,s.evs,s.item,s.ability,s.nature)),enemy=foe.map(i=>foe6[i]).map(s=>makeCombatant(s.sp,s.moves,s.evs,s.item,s.ability,s.nature));state.battle={playerTeam:player,enemyTeam:enemy,activeP:0,activeE:0,revealedPlayer:[0],revealedEnemy:[0],playerField:{reflect:0,lightScreen:0,stealthRock:false,spikes:0,toxicSpikes:0,tailwind:0,trickRoom:0},enemyField:{reflect:0,lightScreen:0,stealthRock:false,spikes:0,toxicSpikes:0,tailwind:0,trickRoom:0},weather:null,weatherTurns:0,locked:false,gameOver:false,forcedSwitch:false,resume:null,online:true,hostTime:420,guestTime:420,totalTime:1200,turnDeadline:Date.now()+45000,log:[]};state.online.pendingLocalAction=null;state.online.pendingRemoteAction=null;state.online.remoteForcedSwitch=false;showScreen('battle');onlinePreview.classList.remove('show');onlineClockbar.classList.add('show');renderBattleScreen();beginOnlineClockTicker();logMessage(`${state.online.foeName}と バトル開始!`,true);logMessage(`いけ! ${player[0].species.name}!`);if(state.online.role==='host'){runLeadAbilities();syncOnlineSnapshot();}}
   function sendOnlineTeamReady(){if(!state.online.conn?.open||state.team.length!==6||state.online.localReady)return;state.online.myTeam6=state.team.map(serializeSlot);state.online.localReady=true;onlineSend({type:'teamReady',name:state.online.myName,team:state.online.myTeam6});updateStartButton();setOnlineStatus('6体を送信しました。相手の準備を待っています…');if(state.online.foeReady)openOnlinePreview();}
   function addPreviewMon(container,sp,i,clickable){const d=document.createElement('div');d.className='preview-mon';d.innerHTML=buildMonsterIcon(sp)+`<div>${sp.name}</div>`;d.dataset.idx=i;if(clickable)d.addEventListener('click',()=>{const p=state.online.previewPick,j=p.indexOf(i);if(j>=0)p.splice(j,1);else if(p.length<3)p.push(i);previewMyTeam.querySelectorAll('.preview-mon').forEach(x=>x.classList.toggle('selected',p.includes(Number(x.dataset.idx))));previewConfirmBtn.disabled=p.length!==3;});container.appendChild(d);}
   function openOnlinePreview(){if(!state.online.myTeam6||!state.online.foeTeam6)return;onlinePreview.classList.add('show');previewMyName.textContent=state.online.myName;previewFoeName.textContent=state.online.foeName;previewMyTeam.innerHTML='';previewFoeTeam.innerHTML='';state.online.previewPick=[];state.online.previewReady=false;previewConfirmBtn.disabled=true;state.online.myTeam6.forEach((x,i)=>addPreviewMon(previewMyTeam,hydrateSlot(x).sp,i,true));state.online.foeTeam6.forEach((x,i)=>addPreviewMon(previewFoeTeam,hydrateSlot(x).sp,i,false));state.online.previewDeadline=Date.now()+90000;clearInterval(state.online.previewTimer);state.online.previewTimer=setInterval(()=>{const sec=Math.max(0,Math.ceil((state.online.previewDeadline-Date.now())/1000));previewTimer.textContent=sec;if(sec<=0){clearInterval(state.online.previewTimer);state.online.previewPick=[0,1,2];previewConfirmBtn.disabled=false;confirmOnlineSelection();}},250);}
@@ -4781,8 +4907,37 @@
   function validPick(p){ return Array.isArray(p) && p.length===3 && new Set(p).size===3 && p.every(i=>Number.isInteger(i)&&i>=0&&i<6); }
   function handleOnlineMessage(m){if(!m||typeof m!=='object')return;if(m.type==='surrender'){finishBySurrender('enemy');return;}if(m.type==='busy'){state.online.busy=true;state.online.connected=false;setOnlineStatus('この部屋はすでに対戦相手が決まっています。別のルームコードを使ってください。');updateStartButton();return;}if(m.type==='hello'||m.type==='helloAck'){state.online.foeName=String(m.name||'Opponent').slice(0,12);setOnlineStatus('相手：'+state.online.foeName+'。6体を選択してください。');if(m.type==='hello')onlineSend({type:'helloAck',name:state.online.myName});return;}if(m.type==='teamReady'){if(!validTeam6(m.team))return;state.online.foeName=String(m.name||state.online.foeName).slice(0,12);state.online.foeTeam6=m.team;state.online.foeReady=true;if(state.online.localReady)openOnlinePreview();return;}if(m.type==='previewReady'){if(!validPick(m.pick))return;state.online.foePick=m.pick;state.online.foeReady=true;if(state.online.role==='host'&&state.online.previewReady){onlineSend({type:'battleStart',hostPick:state.online.previewPick,guestPick:m.pick});startOnlineBattle(state.online.previewPick,m.pick);}return;}if(m.type==='battleStart'&&state.online.role==='guest'){state.online.foePick=m.hostPick;startOnlineBattle(m.hostPick,m.guestPick);return;}if(m.type==='clock'){if(state.online.role==='host'){if(m.guestTime!=null)state.battle.guestTime=m.guestTime;}else{if(m.hostTime!=null)state.battle.hostTime=m.hostTime;if(m.totalTime!=null)state.battle.totalTime=m.totalTime;if(m.turnDeadline!=null)state.battle.turnDeadline=m.turnDeadline;}return;}if(m.type==='action'&&state.online.role==='host'){if(!validRemoteAction(m.action)){syncOnlineSnapshot();return;}state.online.pendingRemoteAction=m.action;maybeRunOnlineActions();return;}if(m.type==='timeOut'){if(m.scope==='total'){finishOnlineTotalTime();return;}if(m.scope==='your'){finishOnlineByTime(m.loser);return;}return;}if(m.type==='battleEnd'&&state.online.role==='guest'){if(state.battle)state.battle.gameOver=true;document.getElementById('overlay-title').textContent=m.hostWon?'はいぼく…':'しょうり!';document.getElementById('overlay-msg').textContent=m.hostWon?'自分の手持ちが すべて たおれてしまった…':'相手の手持ちを すべて たおした!';overlay.classList.add('show');return;}if(m.type==='battleSnapshot'&&state.online.role==='guest'){applyOnlineSnapshot(m);return;}}
   function applyOnlineSnapshot(m){
-    const isReady = m.phase !== 'progress'; // 'progress'=演出の途中経過(表示のみ更新)。それ以外は本来の同期タイミング
-    if(!state.battle?.online){state.battle={playerTeam:m.enemyTeam.map(hydrateCombatant),enemyTeam:m.playerTeam.map(hydrateCombatant),activeP:m.activeE,activeE:m.activeP,playerField:m.enemyField,enemyField:m.playerField,weather:m.weather,weatherTurns:m.weatherTurns,locked:!isReady,gameOver:m.gameOver,forcedSwitch:false,resume:null,online:true,hostTime:m.hostTime,guestTime:m.guestTime,totalTime:m.totalTime??1200,turnDeadline:m.turnDeadline,log:m.log||[]};showScreen('battle');onlinePreview.classList.remove('show');onlineClockbar.classList.add('show');beginOnlineClockTicker();}else{state.battle.playerTeam=m.enemyTeam.map(hydrateCombatant);state.battle.enemyTeam=m.playerTeam.map(hydrateCombatant);state.battle.activeP=m.activeE;state.battle.activeE=m.activeP;state.battle.playerField=m.enemyField;state.battle.enemyField=m.playerField;state.battle.weather=m.weather;state.battle.weatherTurns=m.weatherTurns;state.battle.gameOver=state.battle.gameOver||m.gameOver;state.battle.hostTime=m.hostTime;state.battle.guestTime=m.guestTime;state.battle.totalTime=m.totalTime??state.battle.totalTime;state.battle.turnDeadline=m.turnDeadline;if(isReady)state.online.remoteForcedSwitch=!!m.remoteForcedSwitch;}
+    const isReady = m.phase !== 'progress';
+    const foeRevealedByHost = Array.isArray(m.revealedPlayer) ? m.revealedPlayer.slice() : [m.activeP ?? 0];
+    const myRevealedToHost = Array.isArray(m.revealedEnemy) ? m.revealedEnemy.slice() : [m.activeE ?? 0];
+    if(!state.battle?.online){
+      state.battle={
+        playerTeam:m.enemyTeam.map(hydrateCombatant),
+        enemyTeam:m.playerTeam.map(hydrateCombatant),
+        activeP:m.activeE, activeE:m.activeP,
+        revealedPlayer:myRevealedToHost,
+        revealedEnemy:foeRevealedByHost,
+        playerField:m.enemyField, enemyField:m.playerField,
+        weather:m.weather, weatherTurns:m.weatherTurns,
+        locked:!isReady, gameOver:m.gameOver, forcedSwitch:false, resume:null, online:true,
+        hostTime:m.hostTime, guestTime:m.guestTime, totalTime:m.totalTime??1200,
+        turnDeadline:m.turnDeadline, log:m.log||[]
+      };
+      showScreen('battle');onlinePreview.classList.remove('show');onlineClockbar.classList.add('show');beginOnlineClockTicker();
+    }else{
+      state.battle.playerTeam=m.enemyTeam.map(hydrateCombatant);
+      state.battle.enemyTeam=m.playerTeam.map(hydrateCombatant);
+      state.battle.activeP=m.activeE; state.battle.activeE=m.activeP;
+      state.battle.revealedPlayer=myRevealedToHost;
+      state.battle.revealedEnemy=foeRevealedByHost;
+      state.battle.playerField=m.enemyField; state.battle.enemyField=m.playerField;
+      state.battle.weather=m.weather; state.battle.weatherTurns=m.weatherTurns;
+      state.battle.gameOver=state.battle.gameOver||m.gameOver;
+      state.battle.hostTime=m.hostTime; state.battle.guestTime=m.guestTime;
+      state.battle.totalTime=m.totalTime??state.battle.totalTime;
+      state.battle.turnDeadline=m.turnDeadline;
+      if(isReady)state.online.remoteForcedSwitch=!!m.remoteForcedSwitch;
+    }
     if(m.log){logBox.innerHTML='';m.log.forEach(t=>{const d=document.createElement('div');d.textContent=t;logBox.appendChild(d);});}
     updateSideDisplay('enemy');updateSideDisplay('player');updatePartyBars();
     if(isReady){
@@ -4791,6 +4946,7 @@
     }
     if(m.gameOver&&!overlay.classList.contains('show')){overlay.classList.add('show');document.getElementById('overlay-title').textContent='バトル終了';document.getElementById('overlay-msg').textContent='対戦が終了しました。';}
   }
+
   let hostRetry=0;
   function p2pErrorText(e){const t=e&&e.type;if(t==='peer-unavailable')return '部屋が見つかりません。コードが違うか、ホストが画面を閉じています。';if(t==='network'||t==='server-error'||t==='socket-error'||t==='socket-closed')return '接続サーバーに届きません。通信環境を確認してください。';if(t==='browser-incompatible')return 'このブラウザはP2P通信に対応していません。';return 'P2Pエラー：'+(t||'接続失敗');}
   function createOnlinePeer(){if(typeof Peer==='undefined'){setOnlineStatus('P2Pライブラリを読み込めませんでした。');return;}const code=makeRoomCode();const peer=new Peer('eb-'+code,{debug:0});state.online.peer=peer;state.online.role='host';state.online.roomCode=code;onlineRoomCode.textContent=code;onlineRoomBox.hidden=false;peer.on('open',()=>{hostRetry=0;setOnlineStatus('ルームコードを相手に伝えてください。');});peer.on('connection',c=>{if(state.online.conn&&state.online.conn.open){c.on('open',()=>{try{c.send({type:'busy'});}catch(_){}setTimeout(()=>{try{c.close();}catch(_){}},300);});return;}attachOnlineConnection(c);});peer.on('error',e=>{if(e&&e.type==='unavailable-id'&&hostRetry<3){hostRetry++;try{peer.destroy();}catch(_){}createOnlinePeer();return;}setOnlineStatus(p2pErrorText(e));});}
